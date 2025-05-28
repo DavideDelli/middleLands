@@ -1,20 +1,14 @@
 // server.js
-// Import moduli necessari
 const express = require('express');
 const http = require('http');
-const { Server } = require("socket.io"); // Importa Server da socket.io
-const cors = 'cors'; // Questo non è il modo corretto di importare cors, lo correggerò dopo
+const { Server } = require("socket.io");
 
-// --- Configurazione Iniziale ---
 const app = express();
 const server = http.createServer(app);
 
-// Configurazione CORS - IMPORTANTE per permettere al client (su un'altra porta/dominio) di connettersi
-// Il client HTML viene solitamente aperto come file:// o su un server di sviluppo live (es. porta 5500)
-// mentre il nostro server Node.js sarà su un'altra porta (es. 3000).
 const io = new Server(server, {
     cors: {
-        origin: "*", // Permette connessioni da qualsiasi origine. Per produzione, dovresti restringerlo.
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
@@ -24,133 +18,246 @@ const PORT = process.env.PORT || 3000;
 // --- Logica di Gioco del Server ---
 const GRID_WIDTH = 30;
 const GRID_HEIGHT = 20;
-const DEFAULT_CELL_COLOR = '#2D3748'; // Colore di sfondo delle celle vuote
+const DEFAULT_CELL_COLOR = '#2D3748';
 
-let gameGrid = []; // Array 2D per memorizzare lo stato della griglia [y][x]
-let players = {}; // Oggetto per memorizzare i dettagli dei giocatori { socketId: { id, color, score... } }
+const INITIAL_TROOPS = 25; 
+const TROOP_INCREASE_INTERVAL = 2500; // ms (2.5 secondi)
+const BASE_TROOPS_PER_INTERVAL = 1;
+const TILES_PER_EXTRA_TROOP = 3; // << MODIFICATO: Ora ogni 3 celle danno una truppa extra
 
-// Inizializza la griglia di gioco
+const COST_PER_TILE_DURING_EXPANSION = 5; 
+
+let gameGrid = [];
+let players = {}; 
+
 function initializeGrid() {
-    gameGrid = []; // Resetta la griglia
+    gameGrid = [];
     for (let y = 0; y < GRID_HEIGHT; y++) {
         const row = [];
         for (let x = 0; x < GRID_WIDTH; x++) {
-            row.push({ owner: null, color: DEFAULT_CELL_COLOR }); // Nessun proprietario, colore di default
+            row.push({ owner: null, color: DEFAULT_CELL_COLOR });
         }
         gameGrid.push(row);
     }
     console.log("Griglia di gioco inizializzata.");
 }
 
-// Funzione per inviare l'intera griglia a tutti i client
 function broadcastGridUpdate() {
     io.emit('updateGrid', gameGrid);
 }
 
-// --- Gestione Connessioni Socket.IO ---
+function isTileOwnedByPlayer(x, y, playerId) {
+    return x >= 0 && x < GRID_WIDTH &&
+           y >= 0 && y < GRID_HEIGHT &&
+           gameGrid[y]?.[x]?.owner === playerId;
+}
+
+function hasAdjacentOwnedTile(targetX, targetY, playerId) {
+    const directions = [ { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: -1 }, { dx: 0, dy: 1 } ];
+    for (const dir of directions) {
+        if (isTileOwnedByPlayer(targetX + dir.dx, targetY + dir.dy, playerId)) return true;
+    }
+    return false;
+}
+
+function countPlayerTiles(playerId) {
+    let count = 0;
+    for (let y = 0; y < GRID_HEIGHT; y++) {
+        for (let x = 0; x < GRID_WIDTH; x++) {
+            if (gameGrid[y]?.[x]?.owner === playerId) count++;
+        }
+    }
+    return count;
+}
+
+setInterval(() => {
+    for (const playerId in players) {
+        if (players.hasOwnProperty(playerId)) {
+            const player = players[playerId];
+            const numOwnedTiles = countPlayerTiles(playerId);
+            const troopsGenerated = BASE_TROOPS_PER_INTERVAL + Math.floor(numOwnedTiles / TILES_PER_EXTRA_TROOP);
+            
+            player.troops += troopsGenerated;
+            io.to(playerId).emit('updatePlayerStats', { 
+                troops: player.troops, 
+                troopsPerInterval: troopsGenerated 
+            });
+        }
+    }
+}, TROOP_INCREASE_INTERVAL);
+
 io.on('connection', (socket) => {
     console.log(`Nuovo giocatore connesso: ${socket.id}`);
+    const initialColor = '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
+    players[socket.id] = { id: socket.id, color: initialColor, troops: INITIAL_TROOPS };
 
-    // Inizializza il giocatore
-    // Scegli un colore casuale per il nuovo giocatore se non specificato
-    const initialColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
-    players[socket.id] = {
-        id: socket.id,
-        color: initialColor,
-        // Aggiungi altre proprietà del giocatore qui (punteggio, ecc.)
-    };
-
-    // Invia i dettagli al nuovo giocatore (ID e colore)
     socket.emit('assignPlayerDetails', players[socket.id]);
-    
-    // Invia la griglia corrente al nuovo giocatore
+    const numOwnedTiles = 0; 
+    const initialTroopsGenerated = BASE_TROOPS_PER_INTERVAL + Math.floor(numOwnedTiles / TILES_PER_EXTRA_TROOP);
+    // Invia subito le statistiche iniziali, inclusa la produzione
+    socket.emit('updatePlayerStats', { troops: players[socket.id].troops, troopsPerInterval: initialTroopsGenerated });
     socket.emit('updateGrid', gameGrid);
-    
-    // Informa il client che è pronto (se il client invia 'playerReady')
+
+
     socket.on('playerReady', (data) => {
-        console.log(`Giocatore ${socket.id} è pronto con colore: ${data.color}`);
-        if (data && data.color) {
-            players[socket.id].color = data.color;
-            socket.emit('assignPlayerDetails', players[socket.id]); // Riconferma colore
-        }
-        // Potresti voler inviare un messaggio di benvenuto o altre info qui
+        console.log(`Giocatore ${socket.id} è pronto con colore: ${data.color || players[socket.id].color}`);
+        if (data && data.color) players[socket.id].color = data.color;
+        // Riconferma i dettagli dopo che il colore potrebbe essere cambiato
+        socket.emit('assignPlayerDetails', players[socket.id]); 
+        // Riconferma anche le stats che dipendono dai dettagli (anche se qui non cambiano solo per il colore)
+        const currentOwnedTiles = countPlayerTiles(socket.id);
+        const currentTroopsGenerated = BASE_TROOPS_PER_INTERVAL + Math.floor(currentOwnedTiles / TILES_PER_EXTRA_TROOP);
+        socket.emit('updatePlayerStats', { troops: players[socket.id].troops, troopsPerInterval: currentTroopsGenerated });
+
     });
 
-
-    // Gestione evento 'claimTile' (quando un giocatore clicca una cella)
-    socket.on('claimTile', (data) => {
-        const { x, y } = data;
+    socket.on('initiateExpansion', (data) => {
+        const { x, y, troopsCommitted } = data;
         const player = players[socket.id];
 
         if (!player) {
             socket.emit('errorOccurred', 'Giocatore non trovato.');
             return;
         }
-        
-        const playerColor = player.color; // Usa il colore memorizzato del giocatore
+        if (!(x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT && gameGrid[y]?.[x])) {
+            socket.emit('errorOccurred', 'Coordinate di partenza non valide.');
+            return;
+        }
+        if (!Number.isInteger(troopsCommitted) || troopsCommitted <= 0) {
+            socket.emit('errorOccurred', 'Numero di truppe da impegnare non valido.');
+            return;
+        }
+        if (player.troops < troopsCommitted) {
+            socket.emit('errorOccurred', `Non hai abbastanza truppe per impegnarne ${troopsCommitted}. (Hai: ${player.troops})`);
+            return;
+        }
 
-        if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT) {
-            // Logica di conquista semplice: il giocatore conquista la cella
-            // Potresti aggiungere logica più complessa (es. solo celle adiacenti, costo, ecc.)
-            if (gameGrid[y] && gameGrid[y][x]) {
-                gameGrid[y][x].owner = socket.id;
-                gameGrid[y][x].color = playerColor;
-                console.log(`Giocatore ${socket.id} ha conquistato la cella (${x}, ${y}) con colore ${playerColor}`);
-                broadcastGridUpdate(); // Invia la griglia aggiornata a tutti
-            } else {
-                 socket.emit('errorOccurred', 'Cella non valida o errore di sistema.');
-                 console.error(`Errore: tentativo di accesso a gameGrid[${y}][${x}] fallito.`);
+        const startTile = gameGrid[y][x];
+        const numPlayerTilesBeforeExpansion = countPlayerTiles(socket.id);
+
+        if (startTile.owner === socket.id) {
+            socket.emit('errorOccurred', 'Non puoi espanderti da una cella che già possiedi (scegli una cella neutrale/nemica adiacente).');
+            return;
+        }
+        
+        if (numPlayerTilesBeforeExpansion > 0 && !hasAdjacentOwnedTile(x, y, socket.id)) {
+            socket.emit('errorOccurred', 'Puoi iniziare un\'espansione solo da una cella adiacente al tuo territorio.');
+            return;
+        }
+        if (numPlayerTilesBeforeExpansion === 0 && startTile.owner !== null) {
+            socket.emit('errorOccurred', 'La tua prima cella deve essere neutrale.');
+            return;
+        }
+
+        let actualTroopsSpentInExpansion = 0;
+        let tilesSuccessfullyClaimedThisTurn = 0;
+        const queue = [{ex: x, ey: y}]; 
+        const visitedInThisExpansion = new Set([`${x},${y}`]);
+        let expansionPossible = true;
+
+        if (startTile.owner !== socket.id && (troopsCommitted < COST_PER_TILE_DURING_EXPANSION)) {
+             socket.emit('errorOccurred', `Non abbastanza truppe impegnate per la cella iniziale (costo: ${COST_PER_TILE_DURING_EXPANSION}).`);
+             expansionPossible = false;
+        }
+        
+        if (!expansionPossible) return;
+
+        let head = 0;
+        while(head < queue.length && actualTroopsSpentInExpansion < troopsCommitted) {
+            const current = queue[head++];
+            const currentTile = gameGrid[current.ey][current.ex];
+
+            if (currentTile.owner !== socket.id) {
+                let costForThisSpecificTile = COST_PER_TILE_DURING_EXPANSION;
+                
+                if ((troopsCommitted - actualTroopsSpentInExpansion) >= costForThisSpecificTile) {
+                    if (currentTile.owner !== null && currentTile.owner !== socket.id) {
+                        console.log(`Giocatore ${socket.id} sta conquistando una cella nemica di ${currentTile.owner} a (${current.ex}, ${current.ey})`);
+                    }
+                    currentTile.owner = socket.id;
+                    currentTile.color = player.color;
+                    actualTroopsSpentInExpansion += costForThisSpecificTile;
+                    tilesSuccessfullyClaimedThisTurn++;
+                } else {
+                    continue; 
+                }
             }
+            
+            if (actualTroopsSpentInExpansion < troopsCommitted) {
+                const directions = [ { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: -1 }, { dx: 0, dy: 1 } ];
+                for (const dir of directions) {
+                    const nx = current.ex + dir.dx;
+                    const ny = current.ey + dir.dy;
+                    const neighborCoord = `${nx},${ny}`;
+
+                    if (nx >= 0 && nx < GRID_WIDTH && ny >= 0 && ny < GRID_HEIGHT && !visitedInThisExpansion.has(neighborCoord)) {
+                        const neighborTile = gameGrid[ny][nx];
+                        if (neighborTile.owner !== socket.id) { 
+                            let costForNeighborTile = COST_PER_TILE_DURING_EXPANSION;
+                            if ((troopsCommitted - actualTroopsSpentInExpansion) >= costForNeighborTile) {
+                                visitedInThisExpansion.add(neighborCoord);
+                                queue.push({ex: nx, ey: ny});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (tilesSuccessfullyClaimedThisTurn > 0) {
+            player.troops -= actualTroopsSpentInExpansion;
+            console.log(`Giocatore ${socket.id} ha speso ${actualTroopsSpentInExpansion} truppe per conquistare ${tilesSuccessfullyClaimedThisTurn} celle. Rimanenti: ${player.troops}`);
+            broadcastGridUpdate();
+            const numOwnedTilesNow = countPlayerTiles(socket.id);
+            const troopsGeneratedNow = BASE_TROOPS_PER_INTERVAL + Math.floor(numOwnedTilesNow / TILES_PER_EXTRA_TROOP);
+            io.to(socket.id).emit('updatePlayerStats', { troops: player.troops, troopsPerInterval: troopsGeneratedNow });
         } else {
-            socket.emit('errorOccurred', 'Coordinate della cella non valide.');
-            console.warn(`Tentativo di conquista cella non valida: (${x},${y}) da ${socket.id}`);
+             if (expansionPossible) socket.emit('errorOccurred', 'Espansione fallita o nessuna cella conquistata.');
         }
     });
 
-    // Gestione cambio colore giocatore
     socket.on('changePlayerColor', (data) => {
         if (players[socket.id] && data.newColor) {
             players[socket.id].color = data.newColor;
             console.log(`Giocatore ${socket.id} ha cambiato colore in ${data.newColor}`);
-            // Invia conferma al giocatore che ha cambiato colore
             socket.emit('playerColorUpdated', { playerId: socket.id, newColor: data.newColor });
-            // Potresti voler aggiornare le celle già possedute dal giocatore con il nuovo colore
-            // e poi fare un broadcastGridUpdate(). Per ora, solo le nuove celle avranno il nuovo colore.
+            let changed = false;
+            for(let r=0; r < GRID_HEIGHT; r++){
+                for(let c=0; c < GRID_WIDTH; c++){
+                    if(gameGrid[r][c].owner === socket.id){
+                        gameGrid[r][c].color = data.newColor;
+                        changed = true;
+                    }
+                }
+            }
+            if(changed) broadcastGridUpdate();
         } else {
             socket.emit('errorOccurred', 'Impossibile cambiare colore.');
         }
     });
 
-    // Gestione disconnessione
     socket.on('disconnect', () => {
         console.log(`Giocatore disconnesso: ${socket.id}`);
-        delete players[socket.id]; // Rimuovi il giocatore dall'elenco
-        // Potresti voler gestire la rimozione dei territori del giocatore disconnesso
-        // o renderli neutrali. Per ora, i territori rimangono colorati.
-        // Esempio: rendi neutrali le celle del giocatore disconnesso
-        /*
+        let changed = false;
         for (let y = 0; y < GRID_HEIGHT; y++) {
             for (let x = 0; x < GRID_WIDTH; x++) {
-                if (gameGrid[y][x].owner === socket.id) {
+                if (gameGrid[y]?.[x]?.owner === socket.id) {
                     gameGrid[y][x].owner = null;
                     gameGrid[y][x].color = DEFAULT_CELL_COLOR;
+                    changed = true;
                 }
             }
         }
-        broadcastGridUpdate(); // Aggiorna tutti se hai cambiato le celle
-        */
+        delete players[socket.id];
+        if (changed) broadcastGridUpdate();
     });
 });
 
-// Avvio del server
 server.listen(PORT, () => {
-    initializeGrid(); // Inizializza la griglia quando il server parte
+    initializeGrid();
     console.log(`Server in ascolto sulla porta ${PORT}`);
-    console.log(`Accessibile da http://localhost:${PORT} (anche se non serve una pagina qui)`);
-    console.log(`Il client HTML (il file .html) dovrebbe connettersi a questo server.`);
 });
 
-// Endpoint di base per testare se il server è attivo (opzionale)
 app.get('/', (req, res) => {
-    res.send('<h1>Server del Gioco Territoriale Attivo</h1><p>Connettiti tramite client Socket.IO.</p>');
+    res.send('<h1>Server del Gioco Territoriale Attivo (v4.1)</h1><p>Connettiti tramite client Socket.IO.</p>');
 });

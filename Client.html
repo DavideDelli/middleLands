@@ -3,16 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gioco Territoriale Semplice</title>
+    <title>MiddleLands - v5</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <style>
         body { margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background-color: #1a202c; color: white; font-family: 'Inter', sans-serif; }
-        canvas { border: 1px solid #4A5568; background-color: #2D3748; cursor: pointer; border-radius: 0.5rem; }
-        .controls { margin-top: 20px; padding: 10px; background-color: #2D3748; border-radius: 0.5rem; }
-        .player-info { margin-bottom:10px; font-size: 0.9rem; }
+        /* Rimuoviamo il bordo dal canvas qui, dato che non disegneremo più le linee interne */
+        canvas { background-color: #2D3748; cursor: pointer; border-radius: 0.5rem; } 
+        .controls { margin-top: 20px; padding: 15px; background-color: #2D3748; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 10px; align-items: center;}
+        .player-info { margin-bottom:10px; font-size: 0.9rem; text-align: left; width: 320px; background-color: #2D3748; padding:10px; border-radius: 0.5rem;}
+        .player-info p { margin-bottom: 4px; }
         .color-picker-container { display: flex; align-items: center; gap: 10px; }
         .color-picker-container label { margin-bottom: 0; }
+        .expansion-controls { display: flex; align-items: center; gap: 10px; margin-top:10px;}
+        .expansion-controls label { margin-bottom: 0; font-size: 0.9rem;}
+        .expansion-controls input[type="number"] {
+            width: 70px;
+            padding: 5px;
+            border-radius: 0.25rem;
+            border: 1px solid #4A5568;
+            background-color: #1A202C;
+            color: white;
+            text-align: center;
+        }
         #messageBox {
             position: fixed;
             top: 20px;
@@ -24,7 +37,7 @@
             border-radius: 0.5rem;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2);
             z-index: 1000;
-            display: none; /* Nascosto di default */
+            display: none; 
             font-size: 0.9rem;
         }
     </style>
@@ -33,75 +46,77 @@
 
     <div id="messageBox">Messaggio!</div>
 
-    <h1 class="text-3xl font-bold mb-6">Gioco Territoriale</h1>
+    <h1 class="text-3xl font-bold mb-6">MiddleLands</h1>
 
     <div class="player-info" id="playerInfoContainer">
-        <p>Il tuo ID: <span id="playerIdDisplay" class="font-semibold">In attesa...</span></p>
-        <p>Il tuo colore: <span id="playerColorDisplay" class="font-semibold w-4 h-4 inline-block rounded border border-gray-400" style="background-color: transparent;"></span></p>
+        <p>ID Giocatore: <span id="playerIdDisplay" class="font-semibold">In attesa...</span></p>
+        <p>Colore: <span id="playerColorDisplay" class="font-semibold w-4 h-4 inline-block rounded border border-gray-400 align-middle" style="background-color: transparent;"></span></p>
+        <p>Truppe Totali: <span id="playerTroopsDisplay" class="font-semibold">0</span></p>
+        <p>Produzione Truppe: <span id="playerTroopsPerIntervalDisplay" class="font-semibold">0</span> / intervallo</p>
     </div>
     
     <canvas id="gameCanvas"></canvas>
 
     <div class="controls">
         <div class="color-picker-container">
-            <label for="playerColorPicker" class="text-sm">Scegli il tuo colore:</label>
+            <label for="playerColorPicker" class="text-sm">Scegli colore:</label>
             <input type="color" id="playerColorPicker" value="#FF0000" class="h-8 w-14 rounded border border-gray-500">
-            <button id="changeColorButton" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-sm">Cambia Colore</button>
+            <button id="changeColorButton" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-sm">Cambia</button>
+        </div>
+        <div class="expansion-controls">
+            <label for="troopsToCommitInput">Truppe da impegnare per espansione:</label>
+            <input type="number" id="troopsToCommitInput" value="5" min="1">
         </div>
     </div>
 
     <script>
-        // Configurazione Iniziale
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         
-        const TILE_SIZE = 20; // Dimensione di una cella in pixel
-        const GRID_WIDTH = 30; // Numero di celle in larghezza
-        const GRID_HEIGHT = 20; // Numero di celle in altezza
+        const TILE_SIZE = 20;
+        const GRID_WIDTH = 30;
+        const GRID_HEIGHT = 20;
 
         canvas.width = TILE_SIZE * GRID_WIDTH;
         canvas.height = TILE_SIZE * GRID_HEIGHT;
 
-        let gameGrid = []; // Array 2D per memorizzare lo stato della griglia [y][x]
+        let gameGrid = [];
         let myPlayerId = null;
-        let myPlayerColor = '#FF0000'; // Colore di default
 
         const playerIdDisplay = document.getElementById('playerIdDisplay');
         const playerColorDisplay = document.getElementById('playerColorDisplay');
+        const playerTroopsDisplay = document.getElementById('playerTroopsDisplay');
+        const playerTroopsPerIntervalDisplay = document.getElementById('playerTroopsPerIntervalDisplay'); // Nuovo
         const playerColorPicker = document.getElementById('playerColorPicker');
         const changeColorButton = document.getElementById('changeColorButton');
+        const troopsToCommitInput = document.getElementById('troopsToCommitInput');
         const messageBox = document.getElementById('messageBox');
 
-        // --- Funzioni Utilità ---
         function showMessage(text, duration = 3000, isError = false) {
             messageBox.textContent = text;
-            messageBox.style.backgroundColor = isError ? '#F56565' : '#48BB78'; // Rosso per errore, Verde per successo
+            messageBox.style.backgroundColor = isError ? '#F56565' : '#48BB78';
             messageBox.style.display = 'block';
             setTimeout(() => {
                 messageBox.style.display = 'none';
             }, duration);
         }
 
-        // --- Inizializzazione Socket.IO ---
-        // MODIFICATA: Connessione diretta a localhost:3000
         const socket = io('http://localhost:3000', {
             reconnectionAttempts: 5,
             reconnectionDelay: 1000,
         });
 
-
-        // --- Gestione Eventi Socket.IO ---
         socket.on('connect', () => {
             console.log('Connesso al server con ID:', socket.id);
-            myPlayerId = socket.id;
-            playerIdDisplay.textContent = myPlayerId;
-            socket.emit('playerReady', { color: myPlayerColor }); // Invia il colore iniziale
+            socket.emit('playerReady', { color: playerColorPicker.value });
             showMessage('Connesso al server!');
         });
 
         socket.on('disconnect', (reason) => {
             console.log('Disconnesso dal server:', reason);
             playerIdDisplay.textContent = 'Disconnesso';
+            playerTroopsDisplay.textContent = '0';
+            playerTroopsPerIntervalDisplay.textContent = '0';
             showMessage('Disconnesso dal server.', 3000, true);
         });
         
@@ -113,11 +128,20 @@
 
         socket.on('assignPlayerDetails', (details) => {
             myPlayerId = details.id;
-            myPlayerColor = details.color;
-            playerIdDisplay.textContent = myPlayerId;
-            playerColorDisplay.style.backgroundColor = myPlayerColor;
-            playerColorPicker.value = myPlayerColor;
+            playerIdDisplay.textContent = details.id;
+            playerColorDisplay.style.backgroundColor = details.color;
+            playerColorPicker.value = details.color;
+            // playerTroopsDisplay.textContent = details.troops; // Gestito da updatePlayerStats
             console.log('Dettagli giocatore assegnati:', details);
+        });
+
+        socket.on('updatePlayerStats', (stats) => {
+            if (stats.troops !== undefined) {
+                playerTroopsDisplay.textContent = stats.troops;
+            }
+            if (stats.troopsPerInterval !== undefined) { // Nuovo
+                playerTroopsPerIntervalDisplay.textContent = stats.troopsPerInterval;
+            }
         });
 
         socket.on('updateGrid', (newGrid) => {
@@ -127,9 +151,8 @@
 
         socket.on('playerColorUpdated', (data) => {
             if (data.playerId === myPlayerId) {
-                myPlayerColor = data.newColor;
-                playerColorDisplay.style.backgroundColor = myPlayerColor;
-                playerColorPicker.value = myPlayerColor; // Aggiorna anche il picker
+                playerColorDisplay.style.backgroundColor = data.newColor;
+                playerColorPicker.value = data.newColor;
                 showMessage('Colore aggiornato!');
             }
         });
@@ -139,35 +162,32 @@
             showMessage(`Errore: ${errorMessage}`, 4000, true);
         });
 
-
-        // --- Funzioni di Disegno ---
         function drawGrid() {
             ctx.clearRect(0, 0, canvas.width, canvas.height); 
+            
+            // Colore di sfondo generale del canvas (se le celle non lo coprono tutto)
+            ctx.fillStyle = '#2D3748'; // Grigio scuro di sfondo
+            ctx.fillRect(0,0, canvas.width, canvas.height);
 
             if (!gameGrid || gameGrid.length === 0) {
-                for (let y = 0; y < GRID_HEIGHT; y++) {
-                    for (let x = 0; x < GRID_WIDTH; x++) {
-                        ctx.strokeStyle = '#4A5568'; 
-                        ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                    }
-                }
+                // Non disegniamo più la griglia vuota con strokeRect
                 return;
             }
 
             for (let y = 0; y < GRID_HEIGHT; y++) {
                 for (let x = 0; x < GRID_WIDTH; x++) {
-                    const cell = gameGrid[y] && gameGrid[y][x] ? gameGrid[y][x] : { owner: null, color: '#2D3748' };
-                    
-                    ctx.fillStyle = cell.color || '#2D3748'; 
-                    ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                    
-                    ctx.strokeStyle = '#4A5568'; 
-                    ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    const cell = gameGrid[y]?.[x]; // Usa optional chaining per sicurezza
+                    if (cell && cell.owner) { // Disegna solo le celle possedute
+                        ctx.fillStyle = cell.color; 
+                        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    }
+                    // Non disegniamo più lo strokeRect per le linee della griglia
+                    // ctx.strokeStyle = '#4A5568'; 
+                    // ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
                 }
             }
         }
 
-        // --- Gestione Input ---
         canvas.addEventListener('click', (event) => {
             if (!myPlayerId) {
                 showMessage('Non ancora connesso al server per interagire.', 3000, true);
@@ -180,9 +200,14 @@
             const tileX = Math.floor(mouseX / TILE_SIZE);
             const tileY = Math.floor(mouseY / TILE_SIZE);
 
+            const troopsCommitted = parseInt(troopsToCommitInput.value, 10);
+            if (isNaN(troopsCommitted) || troopsCommitted <= 0) {
+                showMessage('Inserisci un numero valido di truppe da impegnare.', 3000, true);
+                return;
+            }
+
             if (tileX >= 0 && tileX < GRID_WIDTH && tileY >= 0 && tileY < GRID_HEIGHT) {
-                console.log(`Cella cliccata: (${tileX}, ${tileY})`);
-                socket.emit('claimTile', { x: tileX, y: tileY, color: myPlayerColor });
+                socket.emit('initiateExpansion', { x: tileX, y: tileY, troopsCommitted: troopsCommitted });
             }
         });
 
@@ -195,13 +220,8 @@
             socket.emit('changePlayerColor', { newColor: newColor });
         });
         
-        playerColorPicker.addEventListener('input', (event) => {
-            playerColorDisplay.style.backgroundColor = event.target.value;
-        });
-
         drawGrid(); 
         showMessage("In attesa della connessione al server...", 2000);
-
     </script>
 </body>
 </html>
