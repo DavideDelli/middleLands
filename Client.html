@@ -3,93 +3,130 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MiddleLands - v5</title>
+    <title>MiddleLands - v6.1</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <style>
-        body { margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background-color: #1a202c; color: white; font-family: 'Inter', sans-serif; }
-        /* Rimuoviamo il bordo dal canvas qui, dato che non disegneremo più le linee interne */
-        canvas { background-color: #2D3748; cursor: pointer; border-radius: 0.5rem; } 
-        .controls { margin-top: 20px; padding: 15px; background-color: #2D3748; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 10px; align-items: center;}
-        .player-info { margin-bottom:10px; font-size: 0.9rem; text-align: left; width: 320px; background-color: #2D3748; padding:10px; border-radius: 0.5rem;}
-        .player-info p { margin-bottom: 4px; }
-        .color-picker-container { display: flex; align-items: center; gap: 10px; }
-        .color-picker-container label { margin-bottom: 0; }
-        .expansion-controls { display: flex; align-items: center; gap: 10px; margin-top:10px;}
-        .expansion-controls label { margin-bottom: 0; font-size: 0.9rem;}
-        .expansion-controls input[type="number"] {
-            width: 70px;
-            padding: 5px;
+        body { 
+            margin: 0; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            min-height: 100vh; 
+            background-color: #1A202C; /* Sfondo generale */
+            color: white; 
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Per evitare scrollbars se il canvas è grande */
+        }
+        #gameContainer {
+            position: relative; /* Per posizionare gli overlay */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 95vw; /* Occupa gran parte dello schermo */
+            height: 90vh;
+        }
+        canvas { 
+            background-color: #2D3748; /* Sfondo del canvas se non coperto da celle */
+            cursor: pointer; 
+            border-radius: 0.5rem; 
+            /* La dimensione del canvas è impostata da JS */
+        }
+        .ui-overlay {
+            position: absolute;
+            padding: 0.75rem; /* 12px */
+            background-color: rgba(45, 55, 72, 0.85); /* bg-gray-700 con trasparenza */
+            border-radius: 0.375rem; /* rounded-md */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); /* shadow-lg */
+            font-size: 0.875rem; /* text-sm */
+            color: #E2E8F0; /* text-gray-200 */
+            z-index: 10;
+        }
+        #playerIdentification { top: 1rem; left: 1rem; display: flex; flex-direction: column; gap: 0.5rem;}
+        #playerIdentification input[type="color"] { width: 5rem; height: 2rem; }
+        #playerIdentification button { padding: 0.25rem 0.5rem; font-size: 0.75rem;}
+
+        #statsDisplay { top: 1rem; right: 1rem; text-align: right;}
+        #statsDisplay p { margin-bottom: 0.25rem; }
+
+        #troopCommitControls { bottom: 1rem; left: 1rem; display: flex; align-items: center; gap: 0.5rem;}
+        #troopCommitControls input[type="number"] {
+            width: 5rem; /* 80px */
+            padding: 0.5rem; /* 8px */
             border-radius: 0.25rem;
-            border: 1px solid #4A5568;
-            background-color: #1A202C;
+            border: 1px solid #4A5568; /* border-gray-600 */
+            background-color: #1A202C; /* bg-gray-800 */
             color: white;
             text-align: center;
         }
         #messageBox {
             position: fixed;
-            top: 20px;
+            top: 1rem; /* 20px */
             left: 50%;
             transform: translateX(-50%);
-            background-color: #48BB78;
+            background-color: #48BB78; /* bg-green-500 */
             color: white;
-            padding: 10px 20px;
-            border-radius: 0.5rem;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            padding: 0.5rem 1rem; /* py-2 px-4 */
+            border-radius: 0.375rem; /* rounded-md */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
             z-index: 1000;
             display: none; 
-            font-size: 0.9rem;
+            font-size: 0.875rem; /* text-sm */
         }
     </style>
 </head>
-<body class="bg-gray-800 text-white flex flex-col items-center justify-center min-h-screen p-4">
-
+<body>
     <div id="messageBox">Messaggio!</div>
 
-    <h1 class="text-3xl font-bold mb-6">MiddleLands</h1>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
 
-    <div class="player-info" id="playerInfoContainer">
-        <p>ID Giocatore: <span id="playerIdDisplay" class="font-semibold">In attesa...</span></p>
-        <p>Colore: <span id="playerColorDisplay" class="font-semibold w-4 h-4 inline-block rounded border border-gray-400 align-middle" style="background-color: transparent;"></span></p>
-        <p>Truppe Totali: <span id="playerTroopsDisplay" class="font-semibold">0</span></p>
-        <p>Produzione Truppe: <span id="playerTroopsPerIntervalDisplay" class="font-semibold">0</span> / intervallo</p>
-    </div>
-    
-    <canvas id="gameCanvas"></canvas>
-
-    <div class="controls">
-        <div class="color-picker-container">
-            <label for="playerColorPicker" class="text-sm">Scegli colore:</label>
-            <input type="color" id="playerColorPicker" value="#FF0000" class="h-8 w-14 rounded border border-gray-500">
-            <button id="changeColorButton" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md text-sm">Cambia</button>
+        <div id="playerIdentification" class="ui-overlay">
+            <p>ID: <span id="playerIdDisplay" class="font-semibold">...</span></p>
+            <div>
+                Colore: <input type="color" id="playerColorPicker" value="#FF0000">
+                <button id="changeColorButton" class="bg-blue-500 hover:bg-blue-600 text-white rounded">Applica</button>
+            </div>
+             <p>Capitale: <span id="playerCapitalDisplay" class="font-semibold">Nessuna</span></p>
         </div>
-        <div class="expansion-controls">
-            <label for="troopsToCommitInput">Truppe da impegnare per espansione:</label>
-            <input type="number" id="troopsToCommitInput" value="5" min="1">
+
+        <div id="statsDisplay" class="ui-overlay">
+            <p>Produzione: <span id="troopIncomeDisplay" class="font-semibold">0</span> /int.</p>
+            <p>Truppe Totali: <span id="totalTroopsDisplay" class="font-semibold">0</span></p>
+        </div>
+
+        <div id="troopCommitControls" class="ui-overlay">
+            <label for="commitTroopsInput">Truppe per Espansione:</label>
+            <input type="number" id="commitTroopsInput" value="25" min="5" step="5">
+            <span class="text-xs text-gray-400">(Doppio click sulla mappa per espandere)</span>
         </div>
     </div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
+        const gameContainer = document.getElementById('gameContainer');
         
-        const TILE_SIZE = 20;
-        const GRID_WIDTH = 30;
-        const GRID_HEIGHT = 20;
+        const TILE_SIZE = 18; 
+        const GRID_WIDTH = 50; 
+        const GRID_HEIGHT = 35;
 
         canvas.width = TILE_SIZE * GRID_WIDTH;
         canvas.height = TILE_SIZE * GRID_HEIGHT;
 
         let gameGrid = [];
         let myPlayerId = null;
+        let myPlayerCapital = null; 
 
         const playerIdDisplay = document.getElementById('playerIdDisplay');
-        const playerColorDisplay = document.getElementById('playerColorDisplay');
-        const playerTroopsDisplay = document.getElementById('playerTroopsDisplay');
-        const playerTroopsPerIntervalDisplay = document.getElementById('playerTroopsPerIntervalDisplay'); // Nuovo
         const playerColorPicker = document.getElementById('playerColorPicker');
         const changeColorButton = document.getElementById('changeColorButton');
-        const troopsToCommitInput = document.getElementById('troopsToCommitInput');
+        const playerCapitalDisplay = document.getElementById('playerCapitalDisplay');
+        
+        const troopIncomeDisplay = document.getElementById('troopIncomeDisplay');
+        const totalTroopsDisplay = document.getElementById('totalTroopsDisplay');
+        const commitTroopsInput = document.getElementById('commitTroopsInput');
         const messageBox = document.getElementById('messageBox');
 
         function showMessage(text, duration = 3000, isError = false) {
@@ -111,37 +148,23 @@
             socket.emit('playerReady', { color: playerColorPicker.value });
             showMessage('Connesso al server!');
         });
-
-        socket.on('disconnect', (reason) => {
-            console.log('Disconnesso dal server:', reason);
-            playerIdDisplay.textContent = 'Disconnesso';
-            playerTroopsDisplay.textContent = '0';
-            playerTroopsPerIntervalDisplay.textContent = '0';
-            showMessage('Disconnesso dal server.', 3000, true);
-        });
         
-        socket.on('connect_error', (err) => {
-          console.error('Errore di connessione:', err.message);
-          playerIdDisplay.textContent = 'Errore connessione';
-          showMessage(`Errore di connessione: ${err.message}. Assicurati che il server sia in esecuzione.`, 5000, true);
-        });
-
         socket.on('assignPlayerDetails', (details) => {
             myPlayerId = details.id;
-            playerIdDisplay.textContent = details.id;
-            playerColorDisplay.style.backgroundColor = details.color;
+            playerIdDisplay.textContent = details.id.substring(0,6)+'...'; 
             playerColorPicker.value = details.color;
-            // playerTroopsDisplay.textContent = details.troops; // Gestito da updatePlayerStats
-            console.log('Dettagli giocatore assegnati:', details);
+            myPlayerCapital = details.capital;
+            if (myPlayerCapital) {
+                playerCapitalDisplay.textContent = `(${myPlayerCapital.x}, ${myPlayerCapital.y})`;
+            } else {
+                playerCapitalDisplay.textContent = 'Nessuna (Clicca per fondare)';
+            }
+            console.log('Dettagli giocatore ricevuti:', details); // Log importante
         });
 
         socket.on('updatePlayerStats', (stats) => {
-            if (stats.troops !== undefined) {
-                playerTroopsDisplay.textContent = stats.troops;
-            }
-            if (stats.troopsPerInterval !== undefined) { // Nuovo
-                playerTroopsPerIntervalDisplay.textContent = stats.troopsPerInterval;
-            }
+            if (stats.troops !== undefined) totalTroopsDisplay.textContent = stats.troops;
+            if (stats.troopsPerInterval !== undefined) troopIncomeDisplay.textContent = stats.troopsPerInterval;
         });
 
         socket.on('updateGrid', (newGrid) => {
@@ -149,9 +172,8 @@
             drawGrid();
         });
 
-        socket.on('playerColorUpdated', (data) => {
+        socket.on('playerColorUpdated', (data) => { 
             if (data.playerId === myPlayerId) {
-                playerColorDisplay.style.backgroundColor = data.newColor;
                 playerColorPicker.value = data.newColor;
                 showMessage('Colore aggiornato!');
             }
@@ -163,65 +185,78 @@
         });
 
         function drawGrid() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height); 
-            
-            // Colore di sfondo generale del canvas (se le celle non lo coprono tutto)
-            ctx.fillStyle = '#2D3748'; // Grigio scuro di sfondo
-            ctx.fillRect(0,0, canvas.width, canvas.height);
+            ctx.fillStyle = '#2D3748'; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            if (!gameGrid || gameGrid.length === 0) {
-                // Non disegniamo più la griglia vuota con strokeRect
-                return;
-            }
+            if (!gameGrid || gameGrid.length === 0) return;
 
             for (let y = 0; y < GRID_HEIGHT; y++) {
                 for (let x = 0; x < GRID_WIDTH; x++) {
-                    const cell = gameGrid[y]?.[x]; // Usa optional chaining per sicurezza
-                    if (cell && cell.owner) { // Disegna solo le celle possedute
-                        ctx.fillStyle = cell.color; 
+                    const cell = gameGrid[y]?.[x];
+                    if (cell && cell.owner) { 
+                        ctx.fillStyle = cell.color;
                         ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
                     }
-                    // Non disegniamo più lo strokeRect per le linee della griglia
-                    // ctx.strokeStyle = '#4A5568'; 
-                    // ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
                 }
             }
         }
-
+        
+        let lastClickTime = 0;
         canvas.addEventListener('click', (event) => {
-            if (!myPlayerId) {
-                showMessage('Non ancora connesso al server per interagire.', 3000, true);
-                return;
-            }
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = event.clientX - rect.left;
-            const mouseY = event.clientY - rect.top;
+            if (!myPlayerId) return showMessage('Non connesso.', 2000, true);
 
-            const tileX = Math.floor(mouseX / TILE_SIZE);
-            const tileY = Math.floor(mouseY / TILE_SIZE);
+            const currentTime = new Date().getTime();
+            const timeSinceLastClick = currentTime - lastClickTime;
+            // Log per debug del click
+            console.log(`Click rilevato! Tempo dall'ultimo click: ${timeSinceLastClick}ms. Capitale presente: ${!!myPlayerCapital}`);
 
-            const troopsCommitted = parseInt(troopsToCommitInput.value, 10);
-            if (isNaN(troopsCommitted) || troopsCommitted <= 0) {
-                showMessage('Inserisci un numero valido di truppe da impegnare.', 3000, true);
-                return;
-            }
+            if (timeSinceLastClick < 300 && myPlayerCapital) { 
+                // DOPPIO CLICK PER ESPANSIONE (solo se la capitale esiste)
+                console.log("Rilevato doppio click per ESPANSIONE.");
+                const troopsCommitted = parseInt(commitTroopsInput.value, 10);
+                if (isNaN(troopsCommitted) || troopsCommitted <= 0) {
+                    return showMessage('Truppe da impegnare non valide per l\'espansione.', 3000, true);
+                }
+                console.log(`Invio startCircularExpansion con ${troopsCommitted} truppe.`);
+                socket.emit('startCircularExpansion', { troopsCommitted });
 
-            if (tileX >= 0 && tileX < GRID_WIDTH && tileY >= 0 && tileY < GRID_HEIGHT) {
-                socket.emit('initiateExpansion', { x: tileX, y: tileY, troopsCommitted: troopsCommitted });
+            } else if (timeSinceLastClick < 300 && !myPlayerCapital) {
+                // DOPPIO CLICK ACCIDENTALE (quando si cerca di fondare la capitale)
+                console.warn("Rilevato doppio click accidentale mentre si tenta di fondare la capitale.");
+                showMessage('Click singolo per fondare la capitale. Doppio click (dopo aver fondato) per espandere.', 4000, true);
+            
+            } else { 
+                // CLICK SINGOLO
+                console.log("Processo come CLICK SINGOLO.");
+                if (!myPlayerCapital) {
+                    // Tentativo di fondare la capitale
+                    const rect = canvas.getBoundingClientRect();
+                    const mouseX = event.clientX - rect.left;
+                    const mouseY = event.clientY - rect.top;
+                    const tileX = Math.floor(mouseX / TILE_SIZE);
+                    const tileY = Math.floor(mouseY / TILE_SIZE);
+
+                    if (tileX >= 0 && tileX < GRID_WIDTH && tileY >= 0 && tileY < GRID_HEIGHT) {
+                        console.log(`Tentativo di fondare capitale a (${tileX}, ${tileY})`);
+                        socket.emit('claimFirstTile', { x: tileX, y: tileY });
+                    }
+                } else {
+                    // Click singolo dopo aver fondato la capitale
+                     console.log('Click singolo: capitale già esistente. Per espandere, fai doppio click sulla mappa.');
+                     showMessage('Capitale già fondata. Doppio click sulla mappa per espandere.', 3000);
+                }
             }
+            lastClickTime = currentTime;
         });
 
         changeColorButton.addEventListener('click', () => {
-            if (!myPlayerId) {
-                 showMessage('Connettiti prima di cambiare colore.', 3000, true);
-                return;
-            }
+            if (!myPlayerId) return showMessage('Non connesso.', 2000, true);
             const newColor = playerColorPicker.value;
             socket.emit('changePlayerColor', { newColor: newColor });
         });
         
         drawGrid(); 
-        showMessage("In attesa della connessione al server...", 2000);
+        showMessage("Benvenuto! Clicca su una cella vuota per fondare la tua capitale.", 5000);
     </script>
 </body>
 </html>
