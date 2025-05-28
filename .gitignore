@@ -1,0 +1,28 @@
+# Ignora i file di log
+*.log
+
+# Ignora i file temporanei
+*~
+#*#
+.#*
+
+# Ignora i file di configurazione sensibili (se presenti)
+# config.json
+# .env
+
+# Ignora le directory di dipendenze (se presenti)
+# node_modules/
+
+# Ignora i file specifici dell'IDE (es. VS Code)
+.vscode/
+
+# Ignora i file di backup
+*.bak
+
+# Ignora i file generati automaticamente (se presenti)
+# dist/
+# build/
+
+# Ignora i file di sistema
+.DS_Store
+Thumbs.db
